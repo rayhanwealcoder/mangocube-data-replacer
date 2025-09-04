@@ -1,13 +1,13 @@
 <?php
 /**
  * Plugin Name: Mangocube Data Replacer
- * Plugin URI: https://github.com/your-username/mangocube-data-replacer
+ * Plugin URI: https://github.com/rayhanwealcoder/mangocube-data-replacer
  * Description: Professional WordPress admin tool for searching, previewing, and replacing post meta values with advanced features, backups, and live testing.
  * Version: 1.0.0
  * Requires at least: 6.2
  * Requires PHP: 7.4
- * Author: Your Name
- * Author URI: https://yourwebsite.com
+ * Author: Rayhan Uddin
+ * Author URI: https://github.com/rayhanwealcoder
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: mangocube-data-replacer
