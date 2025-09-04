@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles for the plugin */
+.wcfdr-loading {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}

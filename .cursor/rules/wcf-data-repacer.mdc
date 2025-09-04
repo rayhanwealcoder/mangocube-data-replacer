@@ -1,0 +1,312 @@
+---
+alwaysApply: true
+---
+# wcf-data-replacer — Project Rules
+
+## Scope
+A WordPress admin-only tool to visually search, preview, and replace post meta values across posts.
+
+## Naming
+- Prefix: functions/classes/handles => wcfdr_ / WCFDR_
+- Namespace-like foldering: includes/, assets/, admin/, etc.
+
+## Security
+- Admin-only screens; REST endpoints gated by current_user_can('edit_posts').
+- Use WP REST nonce (X-WP-Nonce). Never trust client input.
+- Sanitize all inputs; escape all outputs.
+
+## UX Core
+- Filters: Post Type (select with suggestions), Meta Key (autosuggest), Optional Value Search (text/URL), Case-sensitive toggle, Regex toggle.
+- Results table: Post Title, Meta Key, Meta Value (readonly for preview), “Update” (per-row), “Restore” (per-row if backup exists).
+- Bulk flow: Search → Preview list with yellow highlights → Confirm modal → Replace all → Success summary with counts and per-row status.
+- Live Tester: side panel where user inputs “Find” + “Replace”, selects preset (URL, URL segment, text, full text, portion, regex), sees live matches and replacement example before applying.
+
+## Replace Engine
+- Modes: plain text, case-sensitive plain text, regex (PCRE), URL segment replace, URL path prefix swap, full-text overwrite.
+- Must support dry-run preview (no DB write) and confirm step.
+- Provide replacement diff highlighting (before/after) in preview UI.
+
+## Backups & Restore
+- Before any write, create a per-row meta backup (store original value and timestamp; support multiple revisions per meta key/post with versioning).
+- Show “Restore” button when backup exists; allow restore single row or “Restore all in current result”.
+- Provide side-by-side compare for a row (Original vs Current).
+
+## Performance
+- Server-side pagination (page/per_page); return total and total_pages.
+- Avoid get_post_meta() loops when SQL already has meta_value.
+- All long operations must run in batches; show progress.
+
+## DX & QA
+- Ship acceptance criteria per feature; add canned test data scenarios.
+- Log non-PII errors to PHP error log under WP_DEBUG.
+- Include i18n-ready strings.
+
+## Accessibility
+- Keyboard navigable table; visible focus states; ARIA live regions for toasts; color + icon for status.
+
+# Task one
+
+Create a concise product brief (500–700 words) for “wcf-data-replacer” covering:
+- Problem, audience (site admins, editors, migrations), and outcomes.
+- Key features: search (post type, meta key), preview with highlights, bulk replace with confirmation, regex/presets, backups & restore, autosuggest for post types/meta keys, live tester, per-row update and restore.
+- Non-goals (no direct post_content edits, no options table edits in v1).
+
+Write acceptance criteria as a checklist for:
+- Search accuracy
+- Highlighting correctness
+- Replace all confirmation flow
+- Backup creation on every write
+- Restore (single + all) behavior
+- Regex safety (invalid patterns => safe error)
+- Pagination correctness
+- Permissions (non-editors blocked)
+
+# task 2
+
+Define REST endpoints and their request/response JSON shapes (no code). Include:
+1) GET /wcfdr/v1/search
+   - params: post_type (required), meta_key (required), value (optional), page (int, default 1), per_page (int, default 20), case_sensitive (bool), regex (bool), dry_run (bool; search only)
+   - response: { rows: [{post_id, post_title, meta_key, meta_value, has_backup}], total, total_pages, page, per_page }
+
+2) POST /wcfdr/v1/preview
+   - body: { find, replace, mode: "plain"|"plain_cs"|"regex"|"url"|"url_segment"|"prefix_swap"|"full_text", meta_key, post_type, value_filter?, case_sensitive?, limit?, page? }
+   - response: { rows: [{post_id, post_title, meta_before, meta_after, match_count}], total, total_pages }
+   - purpose: compute server-side preview diffs without writing.
+
+3) POST /wcfdr/v1/replace
+   - body: same as preview + { confirm: true }
+   - response: { ok: true, updated: n, failed: n, items: [{post_id, status, error?}], backup_batch_id }
+
+4) POST /wcfdr/v1/update-row
+   - body: { post_id, meta_key, new_value }
+   - response: { ok: true, post_id, meta_key }
+
+5) GET /wcfdr/v1/backups
+   - params: post_id, meta_key
+   - response: { revisions: [{revision_id, created_at, value_excerpt}] }
+
+6) POST /wcfdr/v1/restore
+   - body: { revision_id } OR { post_id, meta_key, latest: true }
+   - response: { ok: true, restored_revision_id }
+
+7) GET /wcfdr/v1/suggest/meta-keys
+   - params: post_type, q (prefix match)
+   - response: { suggestions: [string] }
+
+Also specify standard error envelope: { ok: false, code, message, details? }.
+Document validation rules and maximums (per_page ≤ 200, regex timeouts, total batch caps).
+
+# Task 3
+
+Write detailed algorithm specs (plain English) for each replace mode:
+
+- plain: substring replace (case-insensitive)
+- plain_cs: substring replace (case-sensitive)
+- regex: PCRE with flags; multiline off by default; anchors ^ $ match entire meta value; replace supports capture groups ($1, $2…); honor a max steps/time budget; safe error on invalid pattern.
+- url: treat value as full URL; operations: replace domain or initial path prefix or entire URL; preserve query and fragment when instructed.
+- url_segment: split by "/", find a specific segment index or named segment, replace only that segment; ensure no double slashes; preserve leading/trailing slashes.
+- prefix_swap: if meta_value starts with `fromPrefix`, replace with `toPrefix`; else no-op.
+- full_text: blindly overwrite entire meta_value with `replace`.
+
+For each mode list:
+- Input assumptions
+- What counts as a “match”
+- How many replacements allowed per value (all)
+- Examples that should pass and fail
+- Unicode considerations (UTF-8)
+- Safety guardrails (max 1000 replacements per row, 5s regex timeout)
+
+# Task 4
+
+Describe the admin page layout and interactions:
+
+HEADER
+- Title, short description, docs/help link.
+
+FILTER BAR
+- Post Type (select with top 10 popular + search), Meta Key (autosuggest), Value contains (text), Toggles: Case sensitive, Regex
+- Buttons: Search, Clear
+- Badge with “X results in Y ms”
+
+RESULTS TABLE
+- Columns: Post Title, Meta Key, Meta Value (scrollable/monospace), Actions: Update, Restore (if backup exists)
+- Yellow highlight for matches (client mirrors server-provided match spans)
+- Pagination: Prev/Next + page indicator
+
+BULK ACTIONS
+- “Preview Replace All” button opens SIDE PANEL:
+   - Inputs: Find, Replace, Mode (presets dropdown), Live Tester (see TASK 5)
+   - Buttons: Run Preview → renders “Before/After” with diff highlights
+   - Confirm Replace All → modal with summary (selected rows count, warnings), requires typed “CONFIRM”
+   - Progress bar; cancel-safe; final summary list.
+
+RESTORE
+- Row context action: Restore (latest) with compare modal (Original vs Current)
+- Toolbar action: Restore All in Current Result (guarded confirmation)
+
+STATE & TOASTS
+- Show success/error toasts; announce via ARIA live; keep a collapsible “Activity Log” panel.
+
+ERRORS
+- Gracefully show invalid regex message with hints; provide a “Try in Live Tester” link.
+
+# Task 5
+
+Design a Live Tester panel:
+
+Inputs
+- Find
+- Replace
+- Mode dropdown: ["Plain (insensitive)","Plain (case-sensitive)","Regex","URL prefix swap","URL segment","Full text overwrite"]
+- Case sensitive toggle (when applicable)
+- Sample Text textarea (seeded from currently selected row’s meta value)
+- Output area showing: Match count, Highlighted matches, Replacement result, Timing, Warnings.
+
+Presets
+- URL → suggest patterns for host swap, path prefix swap, trailing slash normalize.
+- URL segment → pick segment index (0..n) or -1 for last; example shows only that segment changed.
+- Regex → quick inserts: start/end anchors, capture groups, non-greedy, word boundary, escaping helper.
+- Portion → “Replace only the first N matches” (advanced), but default to all.
+
+Validation
+- If Regex invalid, show clear message and example fixes.
+- Show “Applied flags” (i, m, u).
+
+#Task 6 
+
+Provide a curated list of regex patterns with short explanations and realistic examples (NO code):
+
+1) Swap domain keep path
+- Find: ^https?://[^/]+
+- Replace: https://templates.animation-addons.com
+- Example: https://old.example.com/creative-branding-agency → https://templates.animation-addons.com/creative-branding-agency
+
+2) Replace path prefix
+- Find: ^(https?://[^/]+)/(creative-branding-agency)
+- Replace: $1/branding
+- Example: https://templates.../creative-branding-agency/about → https://templates.../branding/about
+
+3) Replace nested path prefix variant
+- Find: ^(https?://[^/]+)/(creative-branding)(/.*)?$
+- Replace: $1/branding$3
+
+4) Normalize double slashes (not after protocol)
+- Find: (?<!:)//
+- Replace: /
+
+5) Trailing slash ensure
+- Find: (?<!/)$
+- Replace: /
+- Use with caution; avoid adding slash to files with extensions.
+
+6) Remove trailing slash
+- Find: /$
+- Replace: (empty)
+
+7) Replace a specific segment by index (simulate with capture groups)
+- Find: ^(https?://[^/]+/)([^/]+)(/.*)$
+- Replace: $1branding$3
+- Changes the first path segment after domain.
+
+8) Case-insensitive text swap
+- Find: (?i)Creative\s*Branding
+- Replace: Branding
+
+9) Whole-value exact match
+- Find: ^https://templates\.animation-addons\.com/creative-branding-agency/$
+- Replace: https://templates.animation-addons.com/branding/
+
+10) Replace only at end of string
+- Find: branding-agency$
+- Replace: branding
+
+11) Replace `/about` at end, keep query/fragment
+- Find: /about(?=(?:\?|#|$))
+- Replace: /about-us
+
+12) Escape literal dots (domain safety)
+- Find: templates\.animation-addons\.com
+- Replace: templates.animation-addons.com (example to show escaping)
+
+13) Word boundary replace (text values)
+- Find: \bAgency\b
+- Replace: Studio
+
+14) First N matches only (document guidance)
+- Pattern as usual + engine option “limit=1” (spec behavior; UI explains this is advanced and defaults to all)
+
+15) Greedy vs non-greedy demo
+- Find: /creative-.*-agency/
+- Replace: /branding/
+- Safer: /creative-.*?-agency/
+
+# Task 7 
+
+Define a per-row backup model:
+
+- For each (post_id, meta_key) write, store:
+  - revision_id (UUID-like)
+  - post_id, meta_key
+  - old_value (original before write)
+  - new_value (the value written)
+  - actor (user id and display name)
+  - created_at (UTC)
+  - batch_id (for bulk operations)
+
+Policies
+- Keep last N (e.g., 10) revisions per (post_id, meta_key); purge older automatically.
+- “Restore latest” uses the highest created_at.
+- “Restore by revision_id” restores that specific snapshot.
+- “Restore all in current result” iterates the current pagination selection; respects capability checks.
+- UI shows compare (Original vs Current) and revision metadata.
+
+# Task 8
+
+Design autosuggest behavior:
+
+Meta Key Suggestion
+- Source: distinct meta_key values found for selected post_type (top 100 by frequency).
+- UX: typeahead dropdown with frequency badges.
+- Performance: server caches list for 5 minutes per post_type.
+
+Post Type Suggestion
+- Show public post types first; allow hidden/custom via “Show all” toggle.
+- Remember last used selections per user (local storage).
+
+Value Hints
+- If the first 20 matches look like URLs (starts with http/https), suggest URL presets automatically.
+
+# Task 9 
+
+Define system-wide guardrails:
+
+- Max per_page 200; Max bulk rows per operation 5000 (require chunking).
+- Regex timeout at 5000 ms per batch; abort with informative error.
+- Detect catastrophic backtracking risk (very nested quantifiers); reject with help text.
+- On bulk failure mid-run, show partial success report and allow “Retry remaining”.
+- Always create backups before first write; if backup fails, abort operation.
+- Prevent identical no-op writes (skip rows where replacement doesn’t change value).
+- Preserve serialized arrays/JSON: if value parses as JSON and mode is not “full_text”, only operate on string values; otherwise warn in preview.
+
+# Task 10
+
+Create a QA checklist with data fixtures:
+
+Data Scenarios
+- URL replacements: domain swap, prefix swap, segment swap, ensure trailing slash.
+- Text replacements: insensitive vs sensitive, word boundary, partial vs full.
+- Regex invalid pattern (e.g., unbalanced parentheses) → clear error.
+- Empty results, pagination > 1 page.
+- Backups: verify revision creation, per-row restore, bulk restore.
+- Large batch (3k rows) with progress, cancel mid-way, resume.
+- JSON meta value where URL is inside JSON; preview warns unless “full_text”.
+
+Accessibility
+- Keyboard-only replace all flow.
+- Screen-reader announcements on results and completion.
+
+Cross-Version
+- WP 6.2+; PHP 7.4+; multisite admin (network vs site admin visibility).
+
+
+
