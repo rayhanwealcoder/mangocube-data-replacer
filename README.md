@@ -329,5 +329,4 @@ This project is licensed under the GPL v2 or later - see the [LICENSE](LICENSE) 
 ---
 
 **Made with ❤️ for the WordPress community**
-#   m a n g o c u b e - d a t a - r e p l a c e r  
- 
+#
