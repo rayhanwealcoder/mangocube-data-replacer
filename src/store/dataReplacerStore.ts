@@ -8,6 +8,7 @@ interface SearchResult {
   rows: Array<{
     post_id: number;
     post_title: string;
+    post_type: string;
     meta_key: string;
     meta_value: string;
     has_backup: boolean;
@@ -34,6 +35,8 @@ interface DataReplacerState {
   getMetaKeys: (postType?: string) => Promise<void>;
   updateRow: (data: any) => Promise<void>;
   restoreRow: (postId: number, metaKey: string) => Promise<void>;
+  previewReplace: (params: any) => Promise<any>;
+  executeReplace: (params: any) => Promise<any>;
   initializeStore: () => Promise<void>;
 }
 
@@ -221,6 +224,76 @@ export const useDataReplacerStore = create<DataReplacerState>((set, get) => ({
       set({ isLoading: false });
     } catch (error) {
       set({ error: 'Restore failed', isLoading: false });
+      throw error;
+    }
+  },
+
+  previewReplace: async (params: any) => {
+    set({ isLoading: true, error: null });
+    
+    try {
+      // Real AJAX call to preview replace
+      const response = await fetch(wcfdr_ajax.ajax_url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          action: 'wcfdr_preview',
+          nonce: wcfdr_ajax.nonce,
+          ...params
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Preview request failed');
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        set({ isLoading: false });
+        return data.data;
+      } else {
+        throw new Error(data.data || 'Preview failed');
+      }
+    } catch (error) {
+      set({ error: 'Preview failed', isLoading: false });
+      throw error;
+    }
+  },
+
+  executeReplace: async (params: any) => {
+    set({ isLoading: true, error: null });
+    
+    try {
+      // Real AJAX call to execute replace
+      const response = await fetch(wcfdr_ajax.ajax_url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          action: 'wcfdr_replace',
+          nonce: wcfdr_ajax.nonce,
+          ...params
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Replace request failed');
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        set({ isLoading: false });
+        return data.data;
+      } else {
+        throw new Error(data.data || 'Replace failed');
+      }
+    } catch (error) {
+      set({ error: 'Replace failed', isLoading: false });
       throw error;
     }
   },

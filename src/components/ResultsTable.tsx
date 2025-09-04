@@ -145,92 +145,59 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
     setIsBulkProcessing(true);
     setBulkProgress(0);
     
-    // Simulate preview processing
-    for (let i = 0; i <= 100; i += 10) {
-      setBulkProgress(i);
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    // Generate actual preview based on selected rows
-    const selectedRowData = results.rows.filter(row => 
-      selectedRows.has(`${row.post_id}-${row.meta_key}`)
-    );
-    
-    // Simulate finding matches in the selected rows
-    const affectedRows = selectedRowData.filter(row => {
-      const value = row.meta_value.toLowerCase();
-      const searchText = findText.toLowerCase();
+    try {
+      // Get the first selected row to determine post_type and meta_key
+      const firstSelectedRow = results.rows.find(row => 
+        selectedRows.has(`${row.post_id}-${row.meta_key}`)
+      );
       
-      if (bulkMode === 'plain' || bulkMode === 'plain_cs') {
-        return value.includes(bulkMode === 'plain_cs' ? findText : searchText);
-      } else if (bulkMode === 'regex') {
-        try {
-          const regex = new RegExp(findText, caseSensitive ? 'g' : 'gi');
-          return regex.test(row.meta_value);
-        } catch {
-          return false;
-        }
-      } else if (bulkMode === 'url') {
-        return value.includes('http') && value.includes(searchText);
-      } else if (bulkMode === 'full_text') {
-        return true; // Always affects full text mode
-      }
-      return false;
-    });
-    
-    // Generate preview data for affected rows
-    const previewData = affectedRows.map(row => {
-      let newValue = row.meta_value;
-      
-      if (bulkMode === 'plain' || bulkMode === 'plain_cs') {
-        const flags = bulkMode === 'plain_cs' ? 'g' : 'gi';
-        const regex = new RegExp(findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
-        newValue = row.meta_value.replace(regex, replaceText);
-      } else if (bulkMode === 'regex') {
-        try {
-          const regex = new RegExp(findText, caseSensitive ? 'g' : 'gi');
-          newValue = row.meta_value.replace(regex, replaceText);
-        } catch {
-          newValue = row.meta_value; // Keep original if regex is invalid
-        }
-      } else if (bulkMode === 'full_text') {
-        newValue = replaceText;
+      if (!firstSelectedRow) {
+        throw new Error('No rows selected');
       }
       
-      return {
-        post_id: row.post_id,
-        post_title: row.post_title,
-        meta_key: row.meta_key,
-        old_value: row.meta_value,
-        new_value: newValue,
-        has_changes: newValue !== row.meta_value
+      // Call the real preview API
+      const { useDataReplacerStore } = await import('../store/dataReplacerStore');
+      const store = useDataReplacerStore.getState();
+      
+      const previewParams = {
+        find: findText,
+        replace: replaceText,
+        mode: bulkMode,
+        post_type: firstSelectedRow.post_type,
+        meta_key: firstSelectedRow.meta_key,
+        case_sensitive: caseSensitive,
+        limit: 5000 // Use high limit for bulk operations
       };
-    });
-    
-    // Set preview results with actual data
-    setBulkPreview({
-      totalRows: selectedRows.size,
-      affectedRows: affectedRows.length,
-      previewData: previewData,
-      warnings: selectedRows.size > 100 ? ['Large operation detected - consider breaking into smaller batches'] : [],
-      estimatedTime: `${Math.ceil(affectedRows.length / 50)} seconds`,
-      findText: findText,
-      replaceText: replaceText,
-      mode: bulkMode
-    });
-    
-    setIsBulkProcessing(false);
+      
+      const previewResults = await store.previewReplace(previewParams);
+      
+      setBulkPreview({
+        totalRows: previewResults.total || 0,
+        affectedRows: previewResults.rows || [],
+        preview: previewResults,
+        warnings: [],
+        estimatedTime: 'Processing...'
+      });
+      
+      setBulkProgress(100);
+      
+    } catch (error) {
+      console.error('Bulk preview failed:', error);
+      setBulkStatus('Preview failed: ' + (error as Error).message);
+    } finally {
+      setIsBulkProcessing(false);
+    }
   };
 
   const handleBulkExecute = async () => {
-    if (!bulkPreview || !bulkPreview.previewData) return;
+    if (!bulkPreview || !bulkPreview.affectedRows) return;
     
     setIsBulkProcessing(true);
     setBulkProgress(0);
     setBulkStatus('Preparing bulk operation...');
     
     try {
-      const affectedRows = bulkPreview.previewData.filter(row => row.has_changes);
+      const affectedRows = bulkPreview.affectedRows;
       
       if (affectedRows.length === 0) {
         alert('No changes to execute!');
@@ -239,77 +206,57 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
       }
       
       // Confirm execution
-      const confirmMessage = `Are you sure you want to replace "${bulkPreview.findText}" with "${bulkPreview.replaceText}" in ${affectedRows.length} rows? This action cannot be undone.`;
+      const confirmMessage = `Are you sure you want to replace "${findText}" with "${replaceText}" in ${affectedRows.length} rows? This action cannot be undone.`;
       if (!confirm(confirmMessage)) {
         setIsBulkProcessing(false);
         setBulkStatus('');
         return;
       }
       
-      // Execute replacements in batches
-      const batchSize = 10;
-      let successCount = 0;
-      let errorCount = 0;
-      const errors: string[] = [];
+      // Get the first row to determine parameters
+      const firstRow = results.rows.find(row => 
+        selectedRows.has(`${row.post_id}-${row.meta_key}`)
+      );
       
-      for (let i = 0; i < affectedRows.length; i += batchSize) {
-        const batch = affectedRows.slice(i, i + batchSize);
-        setBulkStatus(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(affectedRows.length / batchSize)}...`);
-        
-        // Process batch
-        for (const row of batch) {
-          try {
-            setBulkStatus(`Updating row ${row.post_id} (${successCount + 1}/${affectedRows.length})...`);
-            
-            // Call the updateRow function for each row
-            await onUpdateRow({
-              post_id: row.post_id,
-              meta_key: row.meta_key,
-              new_value: row.new_value
-            });
-            successCount++;
-          } catch (error) {
-            errorCount++;
-            errors.push(`Row ${row.post_id}: ${error}`);
-          }
-          
-          // Update progress
-          const progress = Math.round(((i + batch.length) / affectedRows.length) * 100);
-          setBulkProgress(progress);
-          
-          // Small delay to prevent overwhelming the server
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
+      if (!firstRow) {
+        throw new Error('No rows selected');
       }
       
-      // Show results
-      if (errorCount === 0) {
-        setBulkStatus(`Successfully completed! Updated ${successCount} rows.`);
-        setTimeout(() => {
-          alert(`Successfully updated ${successCount} rows!`);
-          // Refresh the results to show updated data
-          if (onPageChange) {
-            onPageChange(1); // Go back to first page to see updated results
-          }
-        }, 1000);
-      } else {
-        setBulkStatus(`Completed with errors: ${successCount} success, ${errorCount} errors`);
-        setTimeout(() => {
-          alert(`Completed with errors:\n\nSuccess: ${successCount} rows\nErrors: ${errorCount} rows\n\nError details:\n${errors.join('\n')}`);
-        }, 1000);
-      }
+      // Call the real bulk replace API
+      const { useDataReplacerStore } = await import('../store/dataReplacerStore');
+      const store = useDataReplacerStore.getState();
       
-      // Clear bulk actions after delay
-      setTimeout(() => {
-        setSelectedRows(new Set());
-        setShowBulkActions(false);
-        setBulkPreview(null);
-        setBulkStatus('');
-      }, 3000);
+      const replaceParams = {
+        find: findText,
+        replace: replaceText,
+        mode: bulkMode,
+        post_type: firstRow.post_type,
+        meta_key: firstRow.meta_key,
+        case_sensitive: caseSensitive,
+        limit: 5000,
+        confirm: true
+      };
+      
+      setBulkStatus('Executing bulk replace...');
+      setBulkProgress(50);
+      
+      const replaceResults = await store.executeReplace(replaceParams);
+      
+      setBulkProgress(100);
+      setBulkStatus(`Bulk replace completed! Updated: ${replaceResults.updated}, Failed: ${replaceResults.failed}`);
+      
+      // Clear preview and reset
+      setBulkPreview(null);
+      setSelectedRows(new Set());
+      
+      // Refresh the search results
+      if (onPageChange) {
+        onPageChange(1);
+      }
       
     } catch (error) {
-      console.error('Bulk execution error:', error);
-      setBulkStatus(`Bulk execution failed: ${error}`);
+      console.error('Bulk execute failed:', error);
+      setBulkStatus('Bulk execute failed: ' + (error as Error).message);
       setTimeout(() => {
         alert(`Bulk execution failed: ${error}`);
         setIsBulkProcessing(false);

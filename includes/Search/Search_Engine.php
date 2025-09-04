@@ -232,6 +232,7 @@ final class Search_Engine {
             "SELECT 
                 p.ID as post_id,
                 p.post_title,
+                p.post_type,
                 pm.meta_key,
                 pm.meta_value,
                 p.post_status,
@@ -252,6 +253,9 @@ final class Search_Engine {
         
         // Add backup information
         $rows = $this->add_backup_info($rows);
+        
+        // Decode HTML entities in meta values for display
+        $rows = $this->decode_meta_values($rows);
         
         return [
             'success' => true,
@@ -314,6 +318,65 @@ final class Search_Engine {
         }
         
         return $rows;
+    }
+    
+    /**
+     * Decode HTML entities in meta values for display
+     */
+    private function decode_meta_values(array $rows): array {
+        foreach ($rows as &$row) {
+            if (isset($row['meta_value']) && !empty($row['meta_value'])) {
+                // Check if the meta value contains URL patterns or HTML entities
+                if ($this->contains_url_patterns($row['meta_value']) || strpos($row['meta_value'], '&amp;') !== false) {
+                    $row['meta_value'] = $this->decode_html_entities($row['meta_value']);
+                }
+            }
+        }
+        return $rows;
+    }
+    
+    /**
+     * Check if content contains URL patterns
+     */
+    private function contains_url_patterns(string $content): bool {
+        // Check if content contains any URL-like patterns
+        $url_patterns = [
+            // Contains http:// or https://
+            '/https?:\/\//i',
+            // Contains domain-like patterns
+            '/[a-zA-Z0-9-]+\.[a-zA-Z]{2,}/',
+            // Contains query parameters
+            '/\?[a-zA-Z0-9&=]+/',
+            // Contains HTML entities that might be in URLs
+            '/&[a-zA-Z]+;/',
+            // Contains URL fragments
+            '/#[a-zA-Z0-9_-]+/'
+        ];
+        
+        foreach ($url_patterns as $pattern) {
+            if (preg_match($pattern, $content)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Decode HTML entities in text, specifically handling &amp; in URLs
+     */
+    private function decode_html_entities(string $text): string {
+        // Decode common HTML entities, especially &amp; which should become &
+        $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        
+        // Additional specific handling for URL-related entities
+        $decoded = str_replace('&amp;', '&', $decoded);
+        $decoded = str_replace('&lt;', '<', $decoded);
+        $decoded = str_replace('&gt;', '>', $decoded);
+        $decoded = str_replace('&quot;', '"', $decoded);
+        $decoded = str_replace('&#039;', "'", $decoded);
+        
+        return $decoded;
     }
     
     /**

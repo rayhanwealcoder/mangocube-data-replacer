@@ -134,14 +134,14 @@ final class Replace_Engine {
             }
             
             // Get search results for preview
-            $search_engine = WCFDR\Search\Search_Engine::getInstance();
+            $search_engine = \WCFDR\Search\Search_Engine::getInstance();
             $search_params = [
                 'post_type' => $validated['post_type'],
                 'meta_key' => $validated['meta_key'],
                 'value' => $validated['value_filter'] ?? '',
                 'case_sensitive' => $validated['case_sensitive'],
                 'regex' => $validated['regex'],
-                'per_page' => $validated['limit'] ?? 100,
+                'per_page' => $validated['limit'] ?? 5000, // Use the actual limit, default to 5000 for bulk operations
                 'page' => 1
             ];
             
@@ -215,7 +215,7 @@ final class Replace_Engine {
             }
             
             // Get search results for replacement
-            $search_engine = WCFDR\Search\Search_Engine::getInstance();
+            $search_engine = \WCFDR\Search\Search_Engine::getInstance();
             $search_params = [
                 'post_type' => $validated['post_type'],
                 'meta_key' => $validated['meta_key'],
@@ -272,6 +272,11 @@ final class Replace_Engine {
     private function preview_single_replacement(string $old_value, string $find, string $replace, string $mode): array {
         $changes = [];
         $match_count = 0;
+        
+        // Always decode HTML entities if content contains URL patterns or &amp;
+        if ($this->contains_url_patterns($old_value) || strpos($old_value, '&amp;') !== false) {
+            $old_value = $this->decode_html_entities($old_value);
+        }
         $new_value = $old_value;
         
         try {
@@ -403,6 +408,11 @@ final class Replace_Engine {
      * Perform a single replacement
      */
     private function perform_replacement(string $old_value, string $find, string $replace, string $mode): string {
+        // Always decode HTML entities if content contains URL patterns or &amp;
+        if ($this->contains_url_patterns($old_value) || strpos($old_value, '&amp;') !== false) {
+            $old_value = $this->decode_html_entities($old_value);
+        }
+        
         switch ($mode) {
             case 'plain':
                 return $this->replace_plain_text($old_value, $find, $replace, false);
@@ -484,6 +494,105 @@ final class Replace_Engine {
             return $to_prefix . substr($text, strlen($from_prefix));
         }
         return $text;
+    }
+    
+    /**
+     * Decode HTML entities in text, specifically handling &amp; in URLs
+     */
+    private function decode_html_entities(string $text): string {
+        // Decode common HTML entities, especially &amp; which should become &
+        $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        
+        // Additional specific handling for URL-related entities
+        $decoded = str_replace('&amp;', '&', $decoded);
+        $decoded = str_replace('&lt;', '<', $decoded);
+        $decoded = str_replace('&gt;', '>', $decoded);
+        $decoded = str_replace('&quot;', '"', $decoded);
+        $decoded = str_replace('&#039;', "'", $decoded);
+        
+        return $decoded;
+    }
+    
+    /**
+     * Check if content contains URL patterns (more lenient than is_url_content)
+     */
+    private function contains_url_patterns(string $content): bool {
+        // Check if content contains any URL-like patterns
+        $url_patterns = [
+            // Contains http:// or https://
+            '/https?:\/\//i',
+            // Contains domain-like patterns
+            '/[a-zA-Z0-9-]+\.[a-zA-Z]{2,}/',
+            // Contains query parameters
+            '/\?[a-zA-Z0-9&=]+/',
+            // Contains HTML entities that might be in URLs
+            '/&[a-zA-Z]+;/',
+            // Contains URL fragments
+            '/#[a-zA-Z0-9_-]+/'
+        ];
+        
+        foreach ($url_patterns as $pattern) {
+            if (preg_match($pattern, $content)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if content is a URL type
+     */
+    private function is_url_content(string $content): bool {
+        // Trim whitespace
+        $content = trim($content);
+        
+        // Check if it's empty
+        if (empty($content)) {
+            return false;
+        }
+        
+        // Check for common URL patterns (including those with HTML entities)
+        $url_patterns = [
+            // Standard HTTP/HTTPS URLs
+            '/^https?:\/\/[^\s]+$/i',
+            // URLs with query parameters
+            '/^https?:\/\/[^\s]+\?[^\s]*$/i',
+            // URLs with fragments
+            '/^https?:\/\/[^\s]+#[^\s]*$/i',
+            // Relative URLs starting with /
+            '/^\/[^\s]*$/',
+            // Protocol-relative URLs
+            '/^\/\/[^\s]+$/i',
+            // URLs with HTML entities like &amp;
+            '/^https?:\/\/[^\s]*&amp;[^\s]*$/i',
+            // URLs with other HTML entities
+            '/^https?:\/\/[^\s]*&[a-zA-Z]+;[^\s]*$/i'
+        ];
+        
+        foreach ($url_patterns as $pattern) {
+            if (preg_match($pattern, $content)) {
+                return true;
+            }
+        }
+        
+        // Check if content contains URL-like patterns with HTML entities
+        if (preg_match('/https?:\/\/[^\s]*&[a-zA-Z]+;[^\s]*/', $content)) {
+            return true;
+        }
+        
+        // Additional check using WordPress filter_var
+        if (filter_var($content, FILTER_VALIDATE_URL)) {
+            return true;
+        }
+        
+        // Check for URLs that might have HTML entities (like &amp;)
+        $decoded_content = $this->decode_html_entities($content);
+        if ($decoded_content !== $content && filter_var($decoded_content, FILTER_VALIDATE_URL)) {
+            return true;
+        }
+        
+        return false;
     }
     
     /**
@@ -583,6 +692,11 @@ final class Replace_Engine {
             
             if (!$backup_result['success']) {
                 throw new \Exception('Failed to create backup');
+            }
+            
+            // Decode HTML entities if the new value contains URL patterns or &amp;
+            if ($this->contains_url_patterns($new_value) || strpos($new_value, '&amp;') !== false) {
+                $new_value = $this->decode_html_entities($new_value);
             }
             
             // Update meta

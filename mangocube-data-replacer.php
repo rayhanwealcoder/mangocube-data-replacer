@@ -180,7 +180,7 @@ final class Mangocube_Data_Replacer {
         }
         
         // Include admin page template
-        include_once WCFDR_PLUGIN_DIR . 'templates/admin-page.php';
+        include_once MCDR_PLUGIN_DIR . 'templates/admin-page.php';
     }
     
     /**
@@ -191,7 +191,7 @@ final class Mangocube_Data_Replacer {
             wp_die(__('You do not have sufficient permissions to access this page.', 'wcf-data-replacer'));
         }
         
-        include WCFDR_PLUGIN_DIR . 'templates/settings-page.php';
+        include MCDR_PLUGIN_DIR . 'templates/settings-page.php';
     }
     
     /**
@@ -206,18 +206,18 @@ final class Mangocube_Data_Replacer {
         // Enqueue React app
         wp_enqueue_script(
             'wcfdr-admin-app',
-            WCFDR_PLUGIN_URL . 'assets/js/admin.js',
+            MCDR_PLUGIN_URL . 'assets/js/admin.js',
             ['wp-element', 'wp-components', 'wp-api-fetch'],
-            WCFDR_VERSION,
+            MCDR_VERSION,
             true
         );
         
         // Enqueue styles
         wp_enqueue_style(
             'wcfdr-admin-styles',
-            WCFDR_PLUGIN_URL . 'assets/css/admin.css',
+            MCDR_PLUGIN_URL . 'assets/css/admin.css',
             [],
-            WCFDR_VERSION
+            MCDR_VERSION
         );
        
         
@@ -657,7 +657,7 @@ final class Mangocube_Data_Replacer {
         load_plugin_textdomain(
             'wcf-data-replacer',
             false,
-            dirname(WCFDR_PLUGIN_BASENAME) . '/languages'
+            dirname(MCDR_PLUGIN_BASENAME) . '/languages'
         );
     }
     
